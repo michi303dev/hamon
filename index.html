@@ -3,22 +3,73 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#102d3b">
+  <meta name="theme-color" content="#10283f">
   <title>hamon</title>
   <style>
     * { box-sizing: border-box; }
     html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
-    body { background: #102d3b; color: #d2e6eb; font-family: system-ui, sans-serif; }
+    body { background: #10283f; color: #d2e6eb; font-family: system-ui, sans-serif; }
     canvas {
       display: block;
       width: 100%;
       height: 100%;
       touch-action: none;
-      background: radial-gradient(ellipse at 50% 35%, #204957, #102d3b 75%);
+      background: radial-gradient(ellipse at 50% 35%, #20435e, #10283f 75%);
     }
     header { position: absolute; top: 24px; left: 24px; pointer-events: none; }
     h1 { margin: 0; font-size: 24px; font-weight: 400; letter-spacing: .16em; }
     p { margin: 8px 0 0; font-size: 13px; color: #a3bec7; }
+    .rain-control {
+      position: absolute;
+      top: 50%;
+      bottom: max(16px, env(safe-area-inset-bottom));
+      left: max(8px, env(safe-area-inset-left));
+      width: 56px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      color: #c5dce3;
+      font-size: 12px;
+      user-select: none;
+    }
+    .rain-control span { pointer-events: none; }
+    #rain {
+      writing-mode: vertical-lr;
+      direction: ltr;
+      appearance: none;
+      -webkit-appearance: none;
+      flex: 1;
+      min-height: 0;
+      width: 48px;
+      margin: 0;
+      background: transparent;
+      cursor: pointer;
+      touch-action: none;
+    }
+    #rain::-webkit-slider-runnable-track {
+      width: 4px;
+      background: #70939f;
+      border-radius: 4px;
+    }
+    #rain::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 28px;
+      height: 28px;
+      margin-left: -12px;
+      border: 2px solid #d2e6eb;
+      border-radius: 50%;
+      background: #20435e;
+    }
+    #rain::-moz-range-track { width: 4px; background: #70939f; border-radius: 4px; }
+    #rain::-moz-range-thumb {
+      width: 24px;
+      height: 24px;
+      border: 2px solid #d2e6eb;
+      border-radius: 50%;
+      background: #20435e;
+    }
+    #rain:focus-visible { outline: 2px solid #d2e6eb; outline-offset: 2px; border-radius: 16px; }
   </style>
 </head>
 <body>
@@ -27,17 +78,39 @@
     <h1>hamon</h1>
     <p>水面をクリック / タップ</p>
   </header>
+  <div class="rain-control">
+    <span aria-hidden="true">yamu</span>
+    <input id="rain" type="range" min="0" max="60" step="1" value="0"
+      aria-label="雨の強さ" aria-orientation="vertical" aria-valuetext="秒間0タップ">
+    <span aria-hidden="true">furu</span>
+  </div>
   <script>
     'use strict';
 
     const canvas = document.getElementById('water');
     const context = canvas.getContext('2d');
+    const rain = document.getElementById('rain');
     const ripples = [];
     const duration = 2600;
     const speed = 110; // CSS pixels per second
     let width = 0;
     let height = 0;
     let frameId = null;
+    const rainResponse = 1; // About three seconds to reach 95% of the target.
+    let targetRainRate = 0;
+    let rainRate = 0;
+    let rainRemainder = 0;
+    let lastRainTime = null;
+    // Always start dry, including browsers that restore form values on reload.
+    rain.value = '0';
+
+    function startAnimation() {
+      if (frameId === null) frameId = requestAnimationFrame(draw);
+    }
+
+    function addRipple(x, y, started) {
+      ripples.push({ x, y, started });
+    }
 
     function resize() {
       const bounds = canvas.getBoundingClientRect();
@@ -50,6 +123,22 @@
     }
 
     function draw(now) {
+      if (lastRainTime !== null) {
+        // Smooth the actual rain rate independently of the screen refresh rate.
+        // Cap elapsed time to avoid bursts after a suspended browser tab.
+        const elapsed = Math.min(Math.max(0, now - lastRainTime), 100) / 1000;
+        const decay = Math.exp(-elapsed / rainResponse);
+        const difference = rainRate - targetRainRate;
+        rainRemainder += targetRainRate * elapsed
+          + difference * rainResponse * (1 - decay);
+        rainRate = targetRainRate + difference * decay;
+        if (Math.abs(rainRate - targetRainRate) < 0.01) rainRate = targetRainRate;
+        while (rainRemainder >= 1 - 1e-9) {
+          addRipple(Math.random() * width, Math.random() * height, now);
+          rainRemainder = Math.max(0, rainRemainder - 1);
+        }
+      }
+      lastRainTime = now;
       context.clearRect(0, 0, width, height);
 
       for (let i = ripples.length - 1; i >= 0; i--) {
@@ -75,18 +164,29 @@
       }
 
       // Stop requesting frames when the water is still.
-      frameId = ripples.length ? requestAnimationFrame(draw) : null;
+      frameId = ripples.length || rainRate > 0 || targetRainRate > 0 ? requestAnimationFrame(draw) : null;
     }
+
+    rain.addEventListener('input', () => {
+      targetRainRate = Number(rain.value);
+      if (frameId === null) {
+        rainRemainder = 0;
+        lastRainTime = performance.now();
+      }
+      rain.setAttribute('aria-valuetext', `秒間${targetRainRate}タップ`);
+      startAnimation();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      lastRainTime = null;
+      rainRemainder = 0;
+    });
 
     canvas.addEventListener('pointerdown', (event) => {
       if (event.pointerType === 'mouse' && event.button !== 0) return;
       const bounds = canvas.getBoundingClientRect();
-      ripples.push({
-        x: event.clientX - bounds.left,
-        y: event.clientY - bounds.top,
-        started: performance.now(),
-      });
-      if (frameId === null) frameId = requestAnimationFrame(draw);
+      addRipple(event.clientX - bounds.left, event.clientY - bounds.top, performance.now());
+      startAnimation();
     });
 
     window.addEventListener('resize', resize);

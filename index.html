@@ -91,8 +91,11 @@
     const context = canvas.getContext('2d');
     const rain = document.getElementById('rain');
     const ripples = [];
-    const duration = 2600;
     const speed = 110; // CSS pixels per second
+    const initialRadius = 2;
+    const maxRadius = initialRadius + speed * 2.6;
+    const ringDelay = 160;
+    const rippleLifetime = (maxRadius - initialRadius) / speed * 1000 + ringDelay * 2;
     let width = 0;
     let height = 0;
     let frameId = null;
@@ -149,21 +152,35 @@
       for (let i = ripples.length - 1; i >= 0; i--) {
         const ripple = ripples[i];
         const age = now - ripple.started;
-        if (age >= duration) {
+        if (age >= rippleLifetime) {
           ripples.splice(i, 1);
           continue;
         }
 
-        const fade = Math.pow(1 - age / duration, 1.5);
         // Each touch produces three concentric rings, slightly delayed.
         for (let ring = 0; ring < 3; ring++) {
-          const ringAge = age - ring * 160;
+          const ringAge = age - ring * ringDelay;
           if (ringAge < 0) continue;
-          const radius = 2 + ringAge / 1000 * speed;
+          const radius = initialRadius + ringAge / 1000 * speed;
+          if (radius >= maxRadius) continue;
+          // All rings fade by distance and disappear at the same radius.
+          const progress = (radius - initialRadius) / (maxRadius - initialRadius);
+          const fade = Math.pow(1 - progress, 1.5);
+          // Ring 0 starts first and is outermost; ring 2 is innermost.
+          const lineWidth = 1.5 * [2, 1.5, 1.2][ring];
+          const alpha = fade * (0.65 - ring * 0.14);
+          // Shade across the stroke's width, rather than around the circle.
+          const gradient = context.createRadialGradient(
+            ripple.x, ripple.y, radius - lineWidth / 2,
+            ripple.x, ripple.y, radius + lineWidth / 2,
+          );
+          gradient.addColorStop(0, `rgba(12, 31, 49, ${alpha})`);
+          gradient.addColorStop(0.5, `rgba(210, 242, 250, ${alpha})`);
+          gradient.addColorStop(1, `rgba(12, 31, 49, ${alpha})`);
           context.beginPath();
           context.arc(ripple.x, ripple.y, radius, 0, Math.PI * 2);
-          context.strokeStyle = `rgba(190, 233, 241, ${fade * (0.65 - ring * 0.14)})`;
-          context.lineWidth = 1.5;
+          context.strokeStyle = gradient;
+          context.lineWidth = lineWidth;
           context.stroke();
         }
       }

@@ -100,6 +100,7 @@
     let targetRainRate = 0;
     let rainRate = 0;
     let rainRemainder = 0;
+    let nextRainDrop = 0.7 + Math.random() * 0.6;
     let lastRainTime = null;
     // Always start dry, including browsers that restore form values on reload.
     rain.value = '0';
@@ -133,9 +134,13 @@
           + difference * rainResponse * (1 - decay);
         rainRate = targetRainRate + difference * decay;
         if (Math.abs(rainRate - targetRainRate) < 0.01) rainRate = targetRainRate;
-        while (rainRemainder >= 1 - 1e-9) {
-          addRipple(Math.random() * width, Math.random() * height, now);
-          rainRemainder = Math.max(0, rainRemainder - 1);
+        while (rainRemainder >= nextRainDrop - 1e-9) {
+          rainRemainder = Math.max(0, rainRemainder - nextRainDrop);
+          // Preserve sub-frame spacing, including multiple drops in one frame.
+          const started = now - (rainRate > 0 ? rainRemainder / rainRate * 1000 : 0);
+          addRipple(Math.random() * width, Math.random() * height, started);
+          // At a steady rate, each interval is 70–130% of the nominal interval.
+          nextRainDrop = 0.7 + Math.random() * 0.6;
         }
       }
       lastRainTime = now;
@@ -168,12 +173,14 @@
     }
 
     rain.addEventListener('input', () => {
-      targetRainRate = Number(rain.value);
+      // A gentle curve gives finer control near yamu and more change near furu.
+      const position = Number(rain.value) / Number(rain.max);
+      targetRainRate = 60 * Math.pow(position, 1.5);
       if (frameId === null) {
         rainRemainder = 0;
         lastRainTime = performance.now();
       }
-      rain.setAttribute('aria-valuetext', `秒間${targetRainRate}タップ`);
+      rain.setAttribute('aria-valuetext', `秒間${Number(targetRainRate.toFixed(1))}タップ`);
       startAnimation();
     });
 

@@ -113,8 +113,8 @@
       volume: 0.09,
       pitchVariation: 0.08,
       tones: [
-        { from: 1960, to: 1040, level: 0.82 },
-        { from: 3460, to: 1740, level: 0.18 },
+        { from: 3920, to: 2080, level: 0.82 },
+        { from: 6920, to: 3480, level: 0.18 },
       ],
     };
     // Always start dry, including browsers that restore form values on reload.
@@ -260,7 +260,14 @@
       if (event.isTrusted && targetRainRate > 0) unlockAudio().catch(() => {});
     }
 
+    function unlockOnMouseDown(event) {
+      if (event.isTrusted && event.pointerType === 'mouse' && event.button === 0) {
+        unlockAudio().catch(() => {});
+      }
+    }
+
     // Touch activation may only become available when the finger lifts.
+    rain.addEventListener('pointerdown', unlockOnMouseDown);
     rain.addEventListener('pointerup', unlockRainAudio);
     rain.addEventListener('touchend', unlockRainAudio, { passive: true });
     rain.addEventListener('click', unlockRainAudio);
@@ -284,6 +291,7 @@
 
     canvas.addEventListener('pointerdown', (event) => {
       if (event.pointerType === 'mouse' && event.button !== 0) return;
+      unlockOnMouseDown(event);
       const bounds = canvas.getBoundingClientRect();
       addRipple(event.clientX - bounds.left, event.clientY - bounds.top, performance.now());
       startAnimation();
@@ -304,7 +312,7 @@
 
     canvas.addEventListener('click', (event) => {
       if (!event.isTrusted) return;
-      playFromGesture();
+      unlockAudio().then(() => playDropSound()).catch(() => {});
     });
 
     window.addEventListener('resize', resize);

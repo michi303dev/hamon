@@ -105,6 +105,18 @@
     let rainRemainder = 0;
     let nextRainDrop = 0.7 + Math.random() * 0.6;
     let lastRainTime = null;
+    let audioContext;
+    const dropSound = {
+      duration: 0.075,
+      attack: 0.0035,
+      sweep: 0.0225,
+      volume: 0.09,
+      pitchVariation: 0.08,
+      tones: [
+        { from: 1960, to: 1040, level: 0.82 },
+        { from: 3460, to: 1740, level: 0.18 },
+      ],
+    };
     // Always start dry, including browsers that restore form values on reload.
     rain.value = '0';
 
@@ -114,6 +126,60 @@
 
     function addRipple(x, y, started) {
       ripples.push({ x, y, started });
+    }
+
+    async function unlockAudio() {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+      if (!audioContext) {
+        // Use media playback on Safari so the silent switch does not mute Web Audio.
+        try {
+          if (navigator.audioSession) navigator.audioSession.type = 'playback';
+        } catch {
+          // AudioSession is optional. Web Audio can still be initialized.
+        }
+        audioContext = new AudioContext();
+      }
+      if (audioContext.state !== 'running') {
+        // Start a silent source during the gesture, including slider gestures.
+        const primer = audioContext.createBufferSource();
+        primer.buffer = audioContext.createBuffer(1, 1, audioContext.sampleRate);
+        primer.connect(audioContext.destination);
+        primer.onended = () => primer.disconnect();
+        primer.start();
+        await audioContext.resume();
+      }
+    }
+
+    function playDropSound(fromGesture = false) {
+      if (!audioContext || (!fromGesture && audioContext.state !== 'running')) return;
+      const start = audioContext.currentTime;
+      const end = start + dropSound.duration;
+      const pitch = 1 + (Math.random() * 2 - 1) * dropSound.pitchVariation;
+      const envelope = audioContext.createGain();
+      envelope.gain.setValueAtTime(0, start);
+      envelope.gain.linearRampToValueAtTime(dropSound.volume, start + dropSound.attack);
+      envelope.gain.exponentialRampToValueAtTime(0.0001, end);
+      envelope.connect(audioContext.destination);
+
+      for (const tone of dropSound.tones) {
+        const oscillator = audioContext.createOscillator();
+        const mix = audioContext.createGain();
+        mix.gain.value = tone.level;
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(tone.from * pitch, start);
+        oscillator.frequency.exponentialRampToValueAtTime(tone.to * pitch, start + dropSound.sweep);
+        oscillator.connect(mix);
+        mix.connect(envelope);
+        oscillator.onended = () => {
+          oscillator.disconnect();
+          mix.disconnect();
+          // Both tones have the same stop time.
+          envelope.disconnect();
+        };
+        oscillator.start(start);
+        oscillator.stop(end);
+      }
     }
 
     function resize() {
@@ -142,6 +208,7 @@
           // Preserve sub-frame spacing, including multiple drops in one frame.
           const started = now - (rainRate > 0 ? rainRemainder / rainRate * 1000 : 0);
           addRipple(Math.random() * width, Math.random() * height, started);
+          playDropSound();
           // At a steady rate, each interval is 70–130% of the nominal interval.
           nextRainDrop = 0.7 + Math.random() * 0.6;
         }
@@ -189,10 +256,19 @@
       frameId = ripples.length || rainRate > 0 || targetRainRate > 0 ? requestAnimationFrame(draw) : null;
     }
 
-    rain.addEventListener('input', () => {
+    function unlockRainAudio(event) {
+      if (event.isTrusted && targetRainRate > 0) unlockAudio().catch(() => {});
+    }
+
+    // Touch activation may only become available when the finger lifts.
+    rain.addEventListener('pointerup', unlockRainAudio);
+    rain.addEventListener('touchend', unlockRainAudio, { passive: true });
+    rain.addEventListener('click', unlockRainAudio);
+    rain.addEventListener('input', (event) => {
       // A gentle curve gives finer control near yamu and more change near furu.
       const position = Number(rain.value) / Number(rain.max);
       targetRainRate = 60 * Math.pow(position, 1.5);
+      unlockRainAudio(event);
       if (frameId === null) {
         rainRemainder = 0;
         lastRainTime = performance.now();
@@ -211,6 +287,24 @@
       const bounds = canvas.getBoundingClientRect();
       addRipple(event.clientX - bounds.left, event.clientY - bounds.top, performance.now());
       startAnimation();
+    });
+
+    function playFromGesture() {
+      unlockAudio().catch(() => {});
+      playDropSound(true);
+    }
+
+    // Schedule directly on touchend. Cancel the follow-up mouse click so
+    // the same tap cannot schedule a second sound.
+    canvas.addEventListener('touchend', (event) => {
+      if (!event.isTrusted) return;
+      event.preventDefault();
+      playFromGesture();
+    }, { passive: false });
+
+    canvas.addEventListener('click', (event) => {
+      if (!event.isTrusted) return;
+      playFromGesture();
     });
 
     window.addEventListener('resize', resize);
